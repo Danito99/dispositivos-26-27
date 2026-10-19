@@ -134,9 +134,12 @@ form.nuevo .full{grid-column:1/-1}
     <p id="gateMsg">Acceso solo para coordinación y el equipo de IT.</p>
     <form id="fLogin" style="display:grid;gap:10px;margin-top:16px">
       <label for="email" style="font-weight:700">Correo del colegio</label>
-      <input type="email" id="email" required autocomplete="email" placeholder="tucorreo@mx.christelhouse.org"
+      <input type="email" id="email" required autocomplete="username"
         style="background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:10px">
-      <button class="btn primary" type="submit">Enviarme el enlace de acceso</button>
+      <label for="password" style="font-weight:700">Contraseña</label>
+      <input type="password" id="password" required autocomplete="current-password"
+        style="background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:10px">
+      <button class="btn primary" type="submit">Entrar</button>
     </form>
     <button id="btnLogout2" class="btn hidden">Cerrar sesión</button>
   </div>
@@ -166,8 +169,8 @@ form.nuevo .full{grid-column:1/-1}
    CONFIGURACIÓN — edita solo esta parte
    ===================================================================== */
 const CONFIG = {
-  SUPABASE_URL: 'https://euqiwrbiydnnaaszbrbs.supabase.co',
-  SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1cWl3cmJpeWRubmFhc3picmJzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0MTYxNDMsImV4cCI6MjEwNzk5MjE0M30.91rYzwt_Tj7GGmKLR6U0pRBTRmbUNWpy3C3RsF4RL84',
+  SUPABASE_URL: 'https://TU-PROYECTO.supabase.co',
+  SUPABASE_ANON_KEY: 'TU-ANON-KEY',
   CICLO: '2026-2027',
   LIMITE_STRIKES: 3,
   DOMINIO: 'mx.christelhouse.org',   // solo se aceptan correos de este dominio
@@ -218,11 +221,10 @@ $('#fLogin').onsubmit = async e => {
   const email = $('#email').value.trim().toLowerCase();
   if (CONFIG.DOMINIO && !email.endsWith('@' + CONFIG.DOMINIO)) { $('#gateMsg').textContent = `Usa tu correo @${CONFIG.DOMINIO}.`; return; }
   const btn = $('#fLogin button'); btn.disabled = true;
-  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
+  const { error } = await sb.auth.signInWithPassword({ email, password: $('#password').value });
   btn.disabled = false;
-  $('#gateMsg').textContent = error
-    ? 'No se pudo enviar el enlace: ' + error.message
-    : `Listo. Revisa ${email} (también la carpeta de correo no deseado) y abre el enlace.`;
+  if (error) { $('#gateMsg').textContent = 'Correo o contraseña incorrectos.'; return; }
+  boot();
 };
 const logout = async () => { await sb.auth.signOut(); location.reload(); };
 $('#btnLogout').onclick = logout; $('#btnLogout2').onclick = logout;
