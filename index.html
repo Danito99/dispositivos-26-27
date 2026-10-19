@@ -132,7 +132,12 @@ form.nuevo .full{grid-column:1/-1}
   <div class="panel">
     <h1>Reportes de equipos</h1>
     <p id="gateMsg">Acceso solo para coordinación y el equipo de IT.</p>
-    <button id="btnLogin" class="btn primary">Entrar con Google</button>
+    <form id="fLogin" style="display:grid;gap:10px;margin-top:16px">
+      <label for="email" style="font-weight:700">Correo del colegio</label>
+      <input type="email" id="email" required autocomplete="email" placeholder="tucorreo@mx.christelhouse.org"
+        style="background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:10px">
+      <button class="btn primary" type="submit">Enviarme el enlace de acceso</button>
+    </form>
     <button id="btnLogout2" class="btn hidden">Cerrar sesión</button>
   </div>
 </div>
@@ -165,7 +170,7 @@ const CONFIG = {
   SUPABASE_ANON_KEY: 'TU-ANON-KEY',
   CICLO: '2026-2027',
   LIMITE_STRIKES: 3,
-  DOMINIO_GOOGLE: '',   // p. ej. 'tucolegio.mx' para que Google solo ofrezca cuentas del colegio
+  DOMINIO: 'mx.christelhouse.org',   // solo se aceptan correos de este dominio
   CATEGORIAS: [
     { nombre: 'Equipo extraviado',               strikes: 1, retiene: false },
     { nombre: 'Cargador extraviado',             strikes: 1, retiene: false },
@@ -205,12 +210,20 @@ async function boot(){
 function showGate(msg, logged){
   $('#app').classList.add('hidden'); $('#gate').classList.remove('hidden');
   $('#gateMsg').textContent = msg;
-  $('#btnLogin').classList.toggle('hidden', logged);
+  $('#fLogin').classList.toggle('hidden', logged);
   $('#btnLogout2').classList.toggle('hidden', !logged);
 }
-$('#btnLogin').onclick = () => sb.auth.signInWithOAuth({ provider: 'google', options: {
-  redirectTo: location.origin + location.pathname,
-  queryParams: CONFIG.DOMINIO_GOOGLE ? { hd: CONFIG.DOMINIO_GOOGLE, prompt: 'select_account' } : { prompt: 'select_account' } } });
+$('#fLogin').onsubmit = async e => {
+  e.preventDefault();
+  const email = $('#email').value.trim().toLowerCase();
+  if (CONFIG.DOMINIO && !email.endsWith('@' + CONFIG.DOMINIO)) { $('#gateMsg').textContent = `Usa tu correo @${CONFIG.DOMINIO}.`; return; }
+  const btn = $('#fLogin button'); btn.disabled = true;
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
+  btn.disabled = false;
+  $('#gateMsg').textContent = error
+    ? 'No se pudo enviar el enlace: ' + error.message
+    : `Listo. Revisa ${email} (también la carpeta de correo no deseado) y abre el enlace.`;
+};
 const logout = async () => { await sb.auth.signOut(); location.reload(); };
 $('#btnLogout').onclick = logout; $('#btnLogout2').onclick = logout;
 
