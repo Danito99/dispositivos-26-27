@@ -357,14 +357,55 @@ function vRetenidos(){
 }
 
 /* ---------- Ficha del alumno ---------- */
-function abrirFicha(id){
+function abrirFicha(id, editar){
   state.abierto = id; const a = state.byId.get(id); if (!a) return;
+  const d0 = $('#ficha');
+  if (editar) {
+    d0.innerHTML = `
+      <div class="dhead"><div><h2>Editar datos</h2><p>${esc(nombre(a))}</p></div>
+        <button class="btn small close" data-cerrar>Cerrar</button></div>
+      <div class="dbody">
+        <form class="nuevo" id="fEditarAlumno">
+          <label>Nombre(s)<input name="nombres" value="${esc(a.nombres ?? '')}" required></label>
+          <label>Apellido paterno<input name="apellido_paterno" value="${esc(a.apellido_paterno ?? '')}" required></label>
+          <label>Apellido materno<input name="apellido_materno" value="${esc(a.apellido_materno ?? '')}"></label>
+          <label>Correo<input type="email" name="correo" value="${esc(a.correo ?? '')}" required></label>
+          <label>Grado<input name="grado" type="number" value="${a.grado ?? ''}" required></label>
+          <label>Grupo<input name="grupo" value="${esc(a.grupo ?? '')}" required></label>
+          <label>No. de lista<input name="num_lista" type="number" value="${a.num_lista ?? ''}"></label>
+          <label>No. de serie del equipo<input name="serie_equipo" value="${esc(a.serie_equipo ?? '')}"></label>
+          <label>ID del cargador<input name="id_cargador" value="${esc(a.id_cargador ?? '')}"></label>
+          <div class="full" style="display:flex;gap:10px">
+            <button class="btn primary" type="submit">Guardar cambios</button>
+            <button class="btn" type="button" data-cancelar-editar>Cancelar</button>
+          </div>
+        </form>
+      </div>`;
+    const fe = $('#fEditarAlumno');
+    fe.onsubmit = async e => {
+      e.preventDefault(); const btn = fe.querySelector('[type=submit]'); btn.disabled = true;
+      const { data, error } = await sb.from('alumnos').update({
+        nombres: fe.nombres.value.trim(), apellido_paterno: fe.apellido_paterno.value.trim(),
+        apellido_materno: fe.apellido_materno.value.trim() || null, correo: fe.correo.value.trim().toLowerCase(),
+        grado: parseInt(fe.grado.value) || null, grupo: fe.grupo.value.trim() || null,
+        num_lista: parseInt(fe.num_lista.value) || null,
+        serie_equipo: fe.serie_equipo.value.trim() || null, id_cargador: fe.id_cargador.value.trim() || null,
+      }).eq('id', id).select().single();
+      btn.disabled = false;
+      if (error) { toast('No se guardaron los cambios: ' + error.message); return; }
+      Object.assign(a, data); toast('Datos del alumno actualizados'); abrirFicha(id); render();
+    };
+    $('#ficha [data-cancelar-editar]').onclick = () => abrirFicha(id);
+    if (!d0.open) d0.showModal();
+    return;
+  }
   const n = strikesDe(id), ret = retencionDe(id);
   const hist = state.reportes.filter(r => r.alumno_id === id);
   const cat0 = CONFIG.CATEGORIAS[0];
   const d = $('#ficha');
   d.innerHTML = `
     <div class="dhead"><div><h2>${esc(a.nombres)} ${esc(a.apellido_paterno)} ${esc(a.apellido_materno)}</h2><p>${grupoDe(a)} · No. de lista ${a.num_lista ?? '—'}</p></div>
+      <button class="btn small" data-editar-alumno="${id}">Editar datos</button>
       <button class="btn small close" data-cerrar>Cerrar</button></div>
     <div class="dbody">
       <div class="datos">
@@ -399,6 +440,7 @@ function abrirFicha(id){
     const { data, error } = await sb.from('reportes').insert({
       alumno_id: id, fecha: f.fecha.value, ciclo: CONFIG.CICLO, categoria: f.categoria.value,
       descripcion: f.descripcion.value.trim() || null, strikes: +f.strikes.value, equipo_retenido: f.retenido.checked && !f.retenido.disabled,
+      registrado_por: state.user.email,
     }).select().single();
     btn.disabled = false;
     if (error) { toast('No se guardó el reporte: ' + error.message); return; }
@@ -423,9 +465,10 @@ async function anular(rid){
   render(); if ($('#ficha').open) abrirFicha(state.abierto);
 }
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-devolver],[data-anular],[data-al],[data-cerrar],[data-grupo],[data-goto]'); if (!t) return;
+  const t = e.target.closest('[data-devolver],[data-anular],[data-al],[data-cerrar],[data-grupo],[data-goto],[data-editar-alumno]'); if (!t) return;
   if (t.dataset.devolver) return devolver(t.dataset.devolver);
   if (t.dataset.anular) return anular(t.dataset.anular);
+  if (t.dataset.editarAlumno) return abrirFicha(t.dataset.editarAlumno, true);
   if (t.dataset.cerrar !== undefined) return $('#ficha').close();
   if (t.dataset.goto) { state.view = t.dataset.goto; return render(); }
   if (t.dataset.grupo) { const m = t.dataset.grupo.match(/^(\d*)°(.*)$/); state.f = { q: '', grado: m?.[1] || '', grupo: m?.[2] || '', solo: true }; state.view = 'alumnos'; return render(); }
