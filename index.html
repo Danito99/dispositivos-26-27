@@ -124,6 +124,13 @@ form.nuevo .full{grid-column:1/-1}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:10px 16px;border-radius:6px;font-weight:700;z-index:99}
 .note{background:var(--brand-soft);border-radius:8px;padding:12px 14px;margin:12px 0}
 @media (prefers-reduced-motion:no-preference){dialog[open]{animation:in .16s ease-out}@keyframes in{from{opacity:0;transform:translateY(8px)}}}
+
+@media print{
+  header, .noprint{display:none!important}
+  main{padding:0;max-width:none}
+  body{background:#fff}
+  .panel,.tablewrap{break-inside:avoid}
+}
 </style>
 </head>
 <body>
@@ -156,6 +163,7 @@ form.nuevo .full{grid-column:1/-1}
       <button data-view="panorama" aria-current="page">Panorama</button>
       <button data-view="alumnos">Alumnos</button>
       <button data-view="retenidos">Equipos retenidos<span class="count" id="cntRet">0</span></button>
+      <button data-view="resumenes">Resúmenes</button>
       <button data-view="importar">Importar lista</button>
     </nav>
   </header>
@@ -184,12 +192,17 @@ const CONFIG = {
     { nombre: 'Uso fuera de horario o lugar',    strikes: 1, retiene: false },
     { nombre: 'Otro',                            strikes: 1, retiene: false },
   ],
+  NIVELES: [
+    { nombre: 'Primaria',     min: 1,  max: 6  },
+    { nombre: 'Secundaria',   min: 7,  max: 9  },
+    { nombre: 'Preparatoria', min: 10, max: 12 },
+  ],
 };
 /* ===================================================================== */
 
 const sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
 const state = { user: null, alumnos: [], reportes: [], byId: new Map(), view: 'panorama',
-  f: { q: '', grado: '', grupo: '', solo: false }, abierto: null };
+  f: { q: '', grado: '', grupo: '', solo: false }, abierto: null, resumenMes: null };
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const hoy = () => new Date().toLocaleDateString('en-CA');
@@ -197,6 +210,8 @@ const fFecha = f => f ? new Date(f.length === 10 ? f + 'T00:00:00' : f).toLocale
 const dias = f => Math.max(0, Math.floor((Date.now() - new Date(f + 'T00:00:00')) / 864e5));
 const nombre = a => a ? `${a.apellido_paterno ?? ''} ${a.apellido_materno ?? ''}, ${a.nombres ?? ''}`.trim() : '(alumno no encontrado)';
 const grupoDe = a => a ? `${a.grado ?? ''}°${a.grupo ?? ''}` : '';
+const nivelDe = grado => CONFIG.NIVELES.find(n => grado >= n.min && grado <= n.max)?.nombre ?? 'Sin nivel';
+const mesLabel = m => { const [y, mm] = m.split('-'); return new Date(+y, +mm - 1, 1).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }); };
 function toast(msg){ const t = document.createElement('div'); t.className='toast'; t.textContent=msg; document.body.append(t); setTimeout(()=>t.remove(), 2600); }
 
 /* ---------- Sesión ---------- */
@@ -261,7 +276,7 @@ function render(){
   document.querySelectorAll('#nav button').forEach(b => b.toggleAttribute('aria-current', b.dataset.view === state.view));
   document.querySelectorAll('#nav button[aria-current]').forEach(b => b.setAttribute('aria-current', 'page'));
   $('#cntRet').textContent = retenidos().length;
-  ({ panorama: vPanorama, alumnos: vAlumnos, retenidos: vRetenidos, importar: vImportar })[state.view]();
+  ({ panorama: vPanorama, alumnos: vAlumnos, retenidos: vRetenidos, resumenes: vResumenes, importar: vImportar })[state.view]();
 }
 
 /* ---------- Panorama ---------- */
@@ -354,6 +369,69 @@ function vRetenidos(){
     <td class="code">${esc(a?.serie_equipo)}</td><td class="code">${esc(a?.id_cargador)}</td><td>${esc(r.categoria)}</td>
     <td><button class="btn small" data-devolver="${r.id}">Marcar devuelto</button></td></tr>`; }).join('')}
   </tbody></table></div>`;
+}
+
+/* ---------- Resúmenes mensuales por nivel ---------- */
+function vResumenes(){
+  const rs = delCiclo();
+  const meses = [...new Set(rs.map(r => r.fecha.slice(0, 7)))].sort().reverse();
+  if (!meses.length) meses.push(hoy().slice(0, 7));
+  if (!state.resumenMes || !meses.includes(state.resumenMes)) state.resumenMes = meses[0];
+  const mes = state.resumenMes;
+  const rsMes = rs.filter(r => r.fecha.slice(0, 7) === mes);
+
+  const niveles = CONFIG.NIVELES.map(niv => {
+    const alumnosNivel = state.alumnos.filter(a => nivelDe(a.grado) === niv.nombre);
+    const idsNivel = new Set(alumnosNivel.map(a => a.id));
+    const repsNivel = rsMes.filter(r => idsNivel.has(r.alumno_id));
+    const strikes = repsNivel.reduce((s, r) => s + r.strikes, 0);
+    const retenidosNuevos = repsNivel.filter(r => r.equipo_retenido).length;
+    const alumnosReportados = new Set(repsNivel.map(r => r.alumno_id)).size;
+    const porCat = {}; repsNivel.forEach(r => porCat[r.categoria] = (porCat[r.categoria] || 0) + 1);
+    const cats = Object.entries(porCat).sort((a, b) => b[1] - a[1]); const max = cats[0]?.[1] || 1;
+    const porGrupo = {};
+    alumnosNivel.forEach(a => { const g = grupoDe(a); porGrupo[g] ??= { g, rep: 0, str: 0, orden: [a.grado, a.grupo] }; });
+    repsNivel.forEach(r => { const a = state.byId.get(r.alumno_id); if (!a) return; const g = porGrupo[grupoDe(a)]; g.rep++; g.str += r.strikes; });
+    const grupos = Object.values(porGrupo).filter(g => g.rep).sort((x, y) => (x.orden[0] - y.orden[0]) || String(x.orden[1]).localeCompare(y.orden[1]));
+    return { niv, repsNivel, strikes, retenidosNuevos, alumnosReportados, cats, max, grupos };
+  });
+  const maxComp = Math.max(1, ...niveles.map(n => n.repsNivel.length));
+
+  $('#view').innerHTML = `
+    <div class="filters noprint">
+      <label class="check" style="flex-direction:column;align-items:flex-start;gap:4px">Mes
+        <select id="fmes">${meses.map(m => `<option value="${m}" ${m === mes ? 'selected' : ''}>${esc(mesLabel(m))}</option>`).join('')}</select>
+      </label>
+      <button class="btn primary" data-descargar-resumen style="margin-left:auto">Descargar PDF</button>
+    </div>
+    <h2 style="margin-bottom:4px">Resumen mensual por nivel</h2>
+    <p class="empty" style="padding:0 0 18px">Ciclo ${esc(CONFIG.CICLO)} · ${esc(mesLabel(mes))}</p>
+
+    <section style="margin-bottom:28px"><h2>Reportes del mes por nivel</h2><div class="panel">
+      ${niveles.some(n => n.repsNivel.length) ? niveles.map(n => `<div class="barrow"><span>${esc(n.niv.nombre)}</span><i style="width:${(n.repsNivel.length / maxComp * 100).toFixed(1)}%"></i><em>${n.repsNivel.length}</em></div>`).join('') : '<p class="empty">Sin reportes en este mes.</p>'}
+    </div></section>
+
+    ${niveles.map(n => `
+      <section style="margin-bottom:28px">
+        <h2>${esc(n.niv.nombre)}</h2>
+        <div class="figs" style="margin-bottom:16px">
+          <div class="fig"><b>${n.repsNivel.length}</b><span>reportes</span></div>
+          <div class="fig"><b>${n.strikes}</b><span>strikes</span></div>
+          <div class="fig"><b>${n.alumnosReportados}</b><span>alumnos reportados</span></div>
+          <div class="fig hold"><b>${n.retenidosNuevos}</b><span>equipos retenidos en el mes</span></div>
+        </div>
+        <div class="cols">
+          <div><h3 style="font-size:.95rem;margin-bottom:10px">Motivos</h3><div class="panel">
+            ${n.cats.length ? n.cats.map(([c, v]) => `<div class="barrow"><span>${esc(c)}</span><i style="width:${(v / n.max * 100).toFixed(1)}%"></i><em>${v}</em></div>`).join('') : '<p class="empty">Sin reportes este mes.</p>'}
+          </div></div>
+          <div><h3 style="font-size:.95rem;margin-bottom:10px">Por grupo</h3>
+            ${n.grupos.length ? `<div class="tablewrap"><table><thead><tr><th>Grupo</th><th class="num">Reportes</th><th class="num">Strikes</th></tr></thead><tbody>
+              ${n.grupos.map(g => `<tr><td>${esc(g.g)}</td><td class="num">${g.rep}</td><td class="num">${g.str}</td></tr>`).join('')}
+            </tbody></table></div>` : '<p class="empty">Sin reportes este mes.</p>'}
+          </div>
+        </div>
+      </section>`).join('')}`;
+  $('#fmes').onchange = e => { state.resumenMes = e.target.value; vResumenes(); };
 }
 
 /* ---------- Ficha del alumno ---------- */
@@ -465,7 +543,8 @@ async function anular(rid){
   render(); if ($('#ficha').open) abrirFicha(state.abierto);
 }
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-devolver],[data-anular],[data-al],[data-cerrar],[data-grupo],[data-goto],[data-editar-alumno]'); if (!t) return;
+  const t = e.target.closest('[data-devolver],[data-anular],[data-al],[data-cerrar],[data-grupo],[data-goto],[data-editar-alumno],[data-descargar-resumen]'); if (!t) return;
+  if (t.dataset.descargarResumen !== undefined) return window.print();
   if (t.dataset.devolver) return devolver(t.dataset.devolver);
   if (t.dataset.anular) return anular(t.dataset.anular);
   if (t.dataset.editarAlumno) return abrirFicha(t.dataset.editarAlumno, true);
